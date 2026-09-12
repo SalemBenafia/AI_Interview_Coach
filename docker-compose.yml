@@ -1,0 +1,427 @@
+services:
+  # ─── PostgreSQL ───────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: coach_postgres
+    restart: unless-stopped
+    # Tuned for 8 GB / 2-core host: keep shared_buffers small so the other
+    # services get RAM; we rely on the OS page cache for the rest.
+    command: >-
+      postgres
+      -c shared_buffers=32MB
+      -c effective_cache_size=96MB
+      -c work_mem=4MB
+      -c maintenance_work_mem=32MB
+      -c max_connections=30
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=4MB
+      -c default_statistics_target=50
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-interview_coach}
+      POSTGRES_USER: ${POSTGRES_USER:-coach}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-coach_secret}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init_db.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-coach} -d ${POSTGRES_DB:-interview_coach}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.3"
+          memory: 192m
+
+  # ─── Redis (state layer + Celery broker) ──────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: coach_redis
+    restart: unless-stopped
+    # volatile-lru evicts only keys that have a TTL set (cache / session
+    # entries) and never evicts Celery broker messages (which have no TTL).
+    command: >-
+      redis-server
+      --appendonly yes
+      --maxmemory 64mb
+      --maxmemory-policy volatile-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.2"
+          memory: 96m
+
+  # ─── MinIO (recordings / reports) ──────────────────────────────────────────
+  minio:
+    image: minio/minio:latest
+    container_name: coach_minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minio123}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "0.2"
+          memory: 96m
+
+  # ─── MailHog (dev SMTP) ────────────────────────────────────────────────────
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: coach_mailhog
+    restart: unless-stopped
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.1"
+          memory: 32m
+
+  # NOTE: No vector database — candidate knowledge retrieval is a plain SQL
+  # filter (see backend/app/modules/agents/engine.py), not RAG.
+
+  # NOTE: No local LLM container — the agentic engine calls Groq
+  # (https://console.groq.com) for LLM inference instead of a self-hosted
+  # model. Set GROQ_API_KEY in .env (get a free key at console.groq.com/keys).
+
+  # ─── coturn (TURN/STUN — real WebRTC NAT traversal) ────────────────────────
+  coturn:
+    image: coturn/coturn:latest
+    container_name: coach_coturn
+    restart: unless-stopped
+    network_mode: "host"
+    volumes:
+      - ./infra/coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
+    command: ["-c", "/etc/coturn/turnserver.conf"]
+    deploy:
+      resources:
+        limits:
+          cpus: "0.1"
+          memory: 48m
+
+  # ─── LiveKit (WebRTC SFU) ───────────────────────────────────────────────────
+  livekit:
+    image: livekit/livekit-server:latest
+    container_name: coach_livekit
+    restart: unless-stopped
+    command: ["--config", "/etc/livekit.yaml"]
+    volumes:
+      - ./infra/livekit/livekit.yaml:/etc/livekit.yaml:ro
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      # 20 UDP ports is enough for ~10 concurrent WebRTC participants
+      - "50000-50020:50000-50020/udp"
+    depends_on:
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "0.3"
+          memory: 192m
+
+  # ─── STT microservice (faster-whisper) ─────────────────────────────────────
+  stt-service:
+    build:
+      context: ./services/stt-service
+    container_name: coach_stt
+    restart: unless-stopped
+    environment:
+      WHISPER_MODEL: ${WHISPER_MODEL:-base}
+      WHISPER_DEVICE: ${WHISPER_DEVICE:-cpu}
+      WHISPER_COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-int8}
+      # beam_size=1 (greedy) cuts CPU time and memory on CPU inference;
+      # accuracy impact is negligible for short interview utterances.
+      WHISPER_BEAM_SIZE: ${WHISPER_BEAM_SIZE:-1}
+    volumes:
+      - whisper_cache:/root/.cache/huggingface
+    ports:
+      - "9002:9001"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          # Whisper base model weights ≈ 75 MB; inference tensors + attention
+          # buffers peak at ~350 MB during transcription. 320 m was enough at
+          # idle but triggered OOM kills (exit 137) during actual STT requests.
+          memory: 448m
+
+  # ─── TTS microservice (Piper) ───────────────────────────────────────────────
+  tts-service:
+    build:
+      context: ./services/tts-service
+    container_name: coach_tts
+    restart: unless-stopped
+    environment:
+      PIPER_VOICE: ${PIPER_VOICE:-en_US-amy-medium}
+    volumes:
+      - ./services/tts-service/voices:/app/voices
+    ports:
+      - "5002:5002"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          # 256m looked right for the voice model + idle overhead but proved
+          # too tight under real synthesis load -- observed 5 crash/restarts
+          # in a single live interview session (each accompanying an
+          # `httpx.RemoteProtocolError: Server disconnected` in the voice
+          # worker's TTS call), stalling the AI's spoken responses.
+          memory: 512m
+
+  # ─── Signal microservice (sentiment/emotion) ────────────────────────────────
+  signal-service:
+    build:
+      context: ./services/signal-service
+    container_name: coach_signals
+    restart: unless-stopped
+    ports:
+      - "8089:8089"
+    volumes:
+      - signal_cache:/root/.cache/huggingface
+    environment:
+      - TRANSFORMERS_CACHE=/root/.cache/huggingface
+      - HF_HOME=/root/.cache/huggingface
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 300m
+
+  # ─── FastAPI Backend ───────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+    container_name: coach_backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-coach}:${POSTGRES_PASSWORD:-coach_secret}@postgres:5432/${POSTGRES_DB:-interview_coach}
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - MINIO_ENDPOINT=minio:9000
+      # Presigned report/PDF URLs go to the candidate's browser, which can't
+      # resolve the "minio" Docker service name -- sign them against the
+      # host-published port instead.
+      - MINIO_PUBLIC_ENDPOINT=localhost:9000
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - GROQ_BASE_URL=https://api.groq.com/openai/v1
+      - WHISPER_SERVICE_URL=http://stt-service:9001
+      - PIPER_TTS_URL=http://tts-service:5002
+      - SENTIMENT_SERVICE_URL=http://signal-service:8089
+      - LIVEKIT_HTTP_URL=http://livekit:7880
+      - SMTP_HOST=mailhog
+    volumes:
+      - ./backend:/app
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      livekit:
+        condition: service_started
+    # 1 worker: async FastAPI handles concurrent requests fine in a single
+    # process; a second process would double RAM for no throughput gain on
+    # a 2-core host where Celery + voice-agent also compete for CPU.
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1
+    deploy:
+      resources:
+        limits:
+          cpus: "0.8"
+          memory: 256m
+
+  # ─── Celery Worker (feedback generation, knowledge extraction, notifications) ──
+  celery_worker:
+    build:
+      context: ./backend
+    container_name: coach_celery_worker
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-coach}:${POSTGRES_PASSWORD:-coach_secret}@postgres:5432/${POSTGRES_DB:-interview_coach}
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - MINIO_ENDPOINT=minio:9000
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - GROQ_BASE_URL=https://api.groq.com/openai/v1
+      - SMTP_HOST=mailhog
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - backend
+      - redis
+    # concurrency=1: one worker process shares the 2-core budget with the
+    # backend + voice-agent; background tasks are not latency-critical.
+    command: celery -A app.core.celery_app worker --loglevel=warning --concurrency=1
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 384m
+
+  # ─── Celery Beat (nightly metrics snapshot) ────────────────────────────────
+  celery_beat:
+    build:
+      context: ./backend
+    container_name: coach_celery_beat
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-coach}:${POSTGRES_PASSWORD:-coach_secret}@postgres:5432/${POSTGRES_DB:-interview_coach}
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - celery_worker
+    command: celery -A app.core.celery_app beat --loglevel=warning
+    deploy:
+      resources:
+        limits:
+          cpus: "0.1"
+          memory: 96m
+
+  # ─── Voice Agent Worker (LiveKit Agents: STT/our-LangGraph-engine/TTS) ────
+  voice-agent:
+    build:
+      context: ./backend
+    container_name: coach_voice_agent
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-coach}:${POSTGRES_PASSWORD:-coach_secret}@postgres:5432/${POSTGRES_DB:-interview_coach}
+      - REDIS_URL=redis://redis:6379/0
+      - LIVEKIT_URL=ws://livekit:7880
+      - LIVEKIT_HTTP_URL=http://livekit:7880
+      - WHISPER_SERVICE_URL=http://stt-service:9001
+      - PIPER_TTS_URL=http://tts-service:5002
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - GROQ_BASE_URL=https://api.groq.com/openai/v1
+      - SENTIMENT_SERVICE_URL=http://signal-service:8089
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - livekit
+      - backend
+    command: python -m app.voice_worker.worker start
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          # Parent alone is ~240 MB (livekit.agents + LangGraph + SQLAlchemy).
+          # With num_idle_processes=0 a child is spawned only when a room is
+          # joined: peak ≈ 240 + 240 = 480 MB. 768m gives safe headroom.
+          memory: 768m
+
+  # ─── Next.js Frontend ──────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      target: dev
+    container_name: coach_frontend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
+      - API_INTERNAL_URL=http://backend:8000/api/v1
+      - NEXT_PUBLIC_WS_URL=ws://localhost:8000
+      - NEXT_PUBLIC_LIVEKIT_URL=ws://localhost:7880
+      # serverExternalPackages excludes livekit-client from the SSR bundle so
+      # webpack no longer processes its ~600 modules server-side; 720 MB
+      # old-space fits comfortably within the 896 MB container ceiling.
+      - NODE_OPTIONS=--max-old-space-size=720
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    command: npm run dev
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 896m
+
+  # ─── Playwright E2E runner ──────────────────────────────────────────────────
+  # The frontend image is node:20-alpine (musl) -- Playwright's bundled
+  # Chromium and --with-deps installer both assume glibc/apt, so it can't
+  # install browsers there. This uses Microsoft's own Playwright image
+  # (Debian/glibc, browsers preinstalled) instead, with its own separate
+  # node_modules (native deps aren't portable across the two images).
+  # network_mode: host is required, not a convenience -- NEXT_PUBLIC_API_URL
+  # is inlined into the browser bundle as http://localhost:8000, so the
+  # browser Playwright drives must see the same "localhost" as the host
+  # machine (where ports 3000/8000/etc are actually published), not an
+  # isolated bridge-network namespace.
+  playwright:
+    image: mcr.microsoft.com/playwright:v1.61.1-noble
+    container_name: coach_playwright
+    working_dir: /app
+    network_mode: host
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
+    depends_on:
+      - backend
+      - frontend
+    command: tail -f /dev/null
+    deploy:
+      resources:
+        limits:
+          # Headed runs add Xvfb + x11vnc + websockify + a real Chromium
+          # window (not just headless), which needs more headroom than a
+          # pure headless runner -- 1g OOM-killed the container mid-suite.
+          cpus: "1.0"
+          memory: 2g
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  whisper_cache:
+  signal_cache:
+
+networks:
+  default:
+    name: interview_coach_network

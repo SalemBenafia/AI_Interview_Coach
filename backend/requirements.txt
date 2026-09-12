@@ -1,0 +1,62 @@
+# ─── FastAPI & ASGI ───────────────────────────────────────────────────────────
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+python-multipart==0.0.9
+
+# ─── Database ─────────────────────────────────────────────────────────────────
+sqlalchemy[asyncio]==2.0.30
+asyncpg==0.29.0
+alembic==1.13.1
+
+# ─── Validation ───────────────────────────────────────────────────────────────
+pydantic==2.13.4
+pydantic-settings==2.14.2
+email-validator==2.1.1
+
+# ─── Authentication ───────────────────────────────────────────────────────────
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+# IMPORTANT: bcrypt>=4.1 breaks passlib 1.7.4's internal self-test
+# ("password cannot be longer than 72 bytes") — pin 4.0.1 until passlib
+# ships a fix. Verified locally; do not bump without re-testing hash_password().
+bcrypt==4.0.1
+
+# ─── Redis (state layer) ───────────────────────────────────────────────────────
+redis[hiredis]==8.0.0
+
+# ─── Task Queue (Celery + Redis, per technologies.txt) ────────────────────────
+celery==5.6.3
+
+# ─── HTTP Client ──────────────────────────────────────────────────────────────
+httpx==0.28.1
+
+# ─── Object Storage ───────────────────────────────────────────────────────────
+minio==7.2.20
+
+# ─── Email (MailHog in dev) ────────────────────────────────────────────────────
+aiosmtplib==5.1.2
+
+# ─── Agentic AI Engine ─────────────────────────────────────────────────────────
+langgraph==1.2.6
+
+# ─── WebRTC (LiveKit) ──────────────────────────────────────────────────────────
+livekit-api==1.1.0
+# livekit-agents is only exercised by the voice-agent worker process
+# (app/voice_worker/) but ships in the same image/requirements file for
+# deployment simplicity — see docker-compose.yml's `voice-agent` service,
+# which runs `python -m app.voice_worker.worker start` from this same image.
+livekit-agents==1.6.2
+
+# ─── PDF report generation ─────────────────────────────────────────────────────
+fpdf2==2.8.7
+
+# ─── Logging ──────────────────────────────────────────────────────────────────
+structlog==24.2.0
+
+# ─── Testing ──────────────────────────────────────────────────────────────────
+pytest==8.2.0
+pytest-asyncio==0.23.6
+pytest-cov==5.0.0
+
+# ─── Dev Tools (linting/types via ruff + ty — see ruff.toml / ty.toml) ───────
+ruff==0.4.4

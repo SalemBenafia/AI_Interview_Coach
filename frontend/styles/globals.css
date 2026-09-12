@@ -1,0 +1,260 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Fonts ─────────────────────────────────────────────────────────────────
+   Display: Space Grotesk — geometric, technical, slightly futuristic; carries
+   the "AI lab" personality from the brief without tipping into novelty.
+   Body: Inter — neutral, highly legible at small sizes for dense dashboards.
+   Mono: JetBrains Mono — for the transcript feed, code-window motif, and
+   any technical readouts (latency, scores, timers). */
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+@layer base {
+  /* ── Dark Neon Tech (the only theme — see Full_Style_Description.txt) ──
+     Background is a deep dark-green/near-black "digital void"; the single
+     bright neon green accent does almost all of the work. Everything else
+     stays quiet so that accent reads as deliberate, not decorative. */
+  :root {
+    --background: 150 24% 4%;            /* #070a08 — digital void */
+    --background-deep: 150 35% 3%;       /* #060906 — hero gradient floor */
+    --foreground: 140 30% 95%;           /* #eef7f0 — off-white, faint green cast */
+
+    --card: 150 22% 7%;                  /* #0d140f */
+    --card-foreground: 140 30% 95%;
+
+    --popover: 150 22% 8%;
+    --popover-foreground: 140 30% 95%;
+
+    --primary: 156 100% 50%;             /* #00ff9f — the neon */
+    --primary-foreground: 150 35% 5%;
+
+    --secondary: 150 18% 12%;
+    --secondary-foreground: 140 25% 90%;
+
+    --muted: 150 16% 11%;
+    --muted-foreground: 138 14% 58%;     /* muted green-gray */
+
+    --accent: 172 78% 60%;               /* #4eead0 — soft glowing cyan */
+    --accent-foreground: 150 35% 6%;
+
+    --destructive: 6 80% 58%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 150 30% 16%;
+    --input: 150 24% 13%;
+    --ring: 156 100% 50%;
+    --radius: 0.75rem;
+
+    /* Status */
+    --success: 156 80% 48%;
+    --success-foreground: 150 35% 6%;
+    --success-muted: 156 60% 12%;
+    --warning: 38 95% 58%;
+    --warning-foreground: 150 35% 6%;
+    --warning-muted: 38 80% 12%;
+    --error: 6 80% 58%;
+    --error-foreground: 0 0% 100%;
+    --error-muted: 6 70% 13%;
+    --info: 172 78% 60%;
+    --info-foreground: 150 35% 6%;
+
+    /* Interview-specific */
+    --session-live: 156 100% 50%;
+    --session-paused: 38 95% 58%;
+    --session-ended: 138 14% 58%;
+    --difficulty-junior: 172 78% 60%;
+    --difficulty-mid: 156 100% 50%;
+    --difficulty-senior: 280 80% 70%;
+
+    /* Sidebar */
+    --sidebar: 150 35% 3%;
+    --sidebar-foreground: 140 25% 88%;
+    --sidebar-border: 150 30% 12%;
+    --sidebar-accent: 156 100% 50%;
+
+    /* Charts */
+    --chart-1: 156 100% 50%;
+    --chart-2: 172 78% 60%;
+    --chart-3: 38 95% 58%;
+    --chart-4: 280 80% 70%;
+    --chart-5: 340 80% 65%;
+
+    /* Fonts */
+    --font-display: 'Space Grotesk', sans-serif;
+    --font-mono-coach: 'JetBrains Mono', monospace;
+  }
+
+  /* next-themes still toggles a `.dark` class for tooling compatibility,
+     but the product has exactly one visual identity — keep it identical. */
+  .dark {
+    --background: 150 24% 4%;
+    --background-deep: 150 35% 3%;
+    --foreground: 140 30% 95%;
+    --card: 150 22% 7%;
+    --card-foreground: 140 30% 95%;
+    --popover: 150 22% 8%;
+    --popover-foreground: 140 30% 95%;
+    --primary: 156 100% 50%;
+    --primary-foreground: 150 35% 5%;
+    --secondary: 150 18% 12%;
+    --secondary-foreground: 140 25% 90%;
+    --muted: 150 16% 11%;
+    --muted-foreground: 138 14% 58%;
+    --accent: 172 78% 60%;
+    --accent-foreground: 150 35% 6%;
+    --border: 150 30% 16%;
+    --input: 150 24% 13%;
+    --ring: 156 100% 50%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    @apply scroll-smooth;
+    font-feature-settings: "cv11", "ss01";
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Inter', system-ui, sans-serif;
+    background-image:
+      radial-gradient(circle at 15% 0%, hsl(156 100% 50% / 0.07), transparent 45%),
+      radial-gradient(circle at 85% 20%, hsl(172 78% 60% / 0.05), transparent 40%);
+    background-attachment: fixed;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display), 'Inter', sans-serif;
+    @apply font-semibold tracking-tight;
+  }
+
+  ::selection {
+    background: hsl(156 100% 50% / 0.25);
+  }
+}
+
+@layer utilities {
+  /* ── Neon glow text — used sparingly, on hero headline + live indicators ── */
+  .glow-text {
+    text-shadow: 0 0 18px hsl(156 100% 50% / 0.45), 0 0 48px hsl(156 100% 50% / 0.18);
+  }
+  .glow-text-sm {
+    text-shadow: 0 0 10px hsl(156 100% 50% / 0.35);
+  }
+
+  /* ── Neon borders / glow rings ──────────────────────────────────────────── */
+  .glow-border {
+    box-shadow: 0 0 0 1px hsl(156 100% 50% / 0.25), 0 0 24px hsl(156 100% 50% / 0.08);
+  }
+  .glow-ring:focus-visible {
+    box-shadow: 0 0 0 2px hsl(var(--background)), 0 0 0 4px hsl(156 100% 50% / 0.55);
+  }
+
+  /* ── Circuit / grid background (hero, empty states) ─────────────────────── */
+  .circuit-grid {
+    background-image:
+      linear-gradient(hsl(156 100% 50% / 0.05) 1px, transparent 1px),
+      linear-gradient(90deg, hsl(156 100% 50% / 0.05) 1px, transparent 1px);
+    background-size: 42px 42px;
+  }
+
+  /* ── Live pulse — recording / session active indicator ──────────────────── */
+  .live-indicator {
+    @apply relative flex h-2 w-2;
+  }
+  .live-indicator::before {
+    content: '';
+    @apply absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75;
+  }
+  .live-indicator::after {
+    content: '';
+    @apply relative inline-flex h-2 w-2 rounded-full bg-primary;
+  }
+
+  /* ── Gradient text (neon → cyan) ──────────────────────────────────────────── */
+  .gradient-text {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-primary to-accent;
+  }
+
+  /* ── Glass / scan-line panel (used by the live interview room) ────────────── */
+  .glass-panel {
+    @apply bg-card/70 backdrop-blur-md border border-white/5;
+  }
+
+  .scanline-overlay {
+    position: relative;
+    overflow: hidden;
+  }
+  .scanline-overlay::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: repeating-linear-gradient(
+      to bottom,
+      transparent 0,
+      transparent 2px,
+      hsl(156 100% 50% / 0.025) 3px,
+      transparent 4px
+    );
+  }
+
+  /* ── Sidebar transition ──────────────────────────────────────────────────── */
+  .sidebar-transition {
+    @apply transition-all duration-200 ease-in-out;
+  }
+
+  /* ── KPI card ─────────────────────────────────────────────────────────────── */
+  .kpi-card {
+    @apply relative overflow-hidden rounded-xl border border-border bg-card p-6 shadow-card hover:shadow-card-hover transition-shadow;
+  }
+
+  /* ── Scrollbar ────────────────────────────────────────────────────────────── */
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 3px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .truncate-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .font-mono-coach {
+    font-family: var(--font-mono-coach), monospace;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+.recharts-responsive-container {
+  min-height: 0;
+}
+
+:focus-visible {
+  @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+}

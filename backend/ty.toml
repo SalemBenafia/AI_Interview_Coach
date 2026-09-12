@@ -1,0 +1,8 @@
+[environment]
+python-version = "3.11"
+
+[rules]
+# SQLAlchemy's declarative typing + FastAPI's dependency-injection patterns
+# produce a lot of structurally-correct-but-hard-to-infer types — keep this
+# advisory rather than build-blocking until the codebase has full coverage.
+possibly-unbound-attribute = "warn"
